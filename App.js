@@ -7,7 +7,7 @@
  */
 
 import React, { Component } from 'react';
-import { StyleSheet, Text, View, Button, FlatList, Modal, TouchableHighlight } from 'react-native';
+import { StyleSheet, Text, View, Button, FlatList, Modal, TouchableHighlight, Alert } from 'react-native';
 import * as firebase from 'firebase';
 import t from 'tcomb-form-native';
 import Swipeout from 'react-native-swipeout';
@@ -76,10 +76,7 @@ class FlatListItem extends Component {
         },
         {
           onPress: () => {
-
-            firebase.database()
-              .ref('pacientes/' + this.props.item.db_key)
-              .update({ nombre: 'foo' });
+            this.props.parentFlatList.modal_actualizar_paciente(this.props.item.db_key)
           },
           text: 'Edit', type: 'edit'
         }
@@ -108,13 +105,56 @@ export default class App extends Component<Props> {
     this.state = {
       pacientes: [],
       modalVisible: false,
-      deletedRowKey: null
+      switch: true,
+      updatekey: null,
+      deletedRowKey: null,
+      submit_text: "Agregar Paciente",
+      form_value: {
+        apellidos: "",
+        cedula: "",
+        nombre: ""
+      }
     }
 
   }
 
   setModalVisible(visible) {
     this.setState({ modalVisible: visible });
+  }
+
+  modal_agregar_paciente = () => {
+    this.setState({
+      form_value: {
+        apellidos: "",
+        cedula: "",
+        nombre: ""
+      }
+    })
+    this.state.switch = true;
+    this.state.submit_text = "Agregar Paciente"
+    this.setModalVisible(true)
+  }
+
+  modal_actualizar_paciente(key) {
+    firebase.database().ref()
+      .child("pacientes")
+      .child(key)
+      .once("value")
+      .then(dataSnapshot => {
+        var apellidos = dataSnapshot.node_.children_.root_.left.value.value_
+        var cedula = dataSnapshot.node_.children_.root_.value.value_
+        var nombre = dataSnapshot.node_.children_.root_.right.value.value_
+
+        this.state.form_value = {
+          apellidos: apellidos,
+          cedula: cedula,
+          nombre: nombre
+        }
+        this.state.submit_text = "Guardar Cambios"
+        this.state.updatekey = key
+        this.state.switch = false
+        this.setModalVisible(true)
+      })
   }
 
   refreshList = (deletedKey) => {
@@ -140,6 +180,7 @@ export default class App extends Component<Props> {
               data[key]['db_key'] = key
               return data[key]
             })
+            //pacientes: Object.keys(data).map(key => data[key])
           })
         }
       });
@@ -149,24 +190,101 @@ export default class App extends Component<Props> {
       .ref()
       .child("pacientes")
       .on("child_added", snapshot => {
-        const data = snapshot.val();
+        var data = snapshot.val();
+        data["db_key"] = snapshot.key
         if (data) {
           this.setState(prevState => ({
             pacientes: [data, ...prevState.pacientes]
           }))
+
+        }
+      })
+
+    // firebase
+    //   .database()
+    //   .ref()
+    //   .child("pacientes")
+    //   .on("child_changed", snapshot => {
+    //     var data = snapshot.val();
+    //     data["cedula"] = snapshot.key
+    //     console.log("edit event")
+    //     // if (data) {
+    //     //   this.setState(prevState => ({
+    //     //     pacientes: [data, ...prevState.pacientes]
+    //     //   }))
+    //     // }
+    //   })
+  }
+
+  agregar_paciente(paciente) {
+    firebase.database().ref()
+      .child("pacientes")
+      .orderByChild('cedula')
+      .equalTo(paciente.cedula)
+      .limitToFirst(1)
+      .once('value', snapshot => {
+        console.log("entre mae ****")
+        if (snapshot.node_.children_.root_.key == undefined) {
+
+          firebase.database().ref()
+            .child("pacientes")
+            .push()
+            .set(paciente)
+            .then(() => { this.setModalVisible(false) })
+            .catch(err => {
+              Alert.alert(
+                'Error',
+                'No se pudo guardar el paciente',
+                [
+                  { text: 'OK' },
+                ],
+                { cancelable: false }
+              )
+            })
+        }
+        else {
+          Alert.alert(
+            'Error',
+            'Cedula Repetida',
+            [
+              { text: 'OK' },
+            ],
+            { cancelable: false }
+          )
         }
       })
   }
 
-
-  agregar_paciente = () => {
-    const value = this._form.getValue();
-
-    firebase.database().ref()
-      .child("pacientes")
-      .push()
-      .set(value, () => this.setModalVisible(false))
+  actualizar_paciente(paciente) {
+    firebase.database()
+      .ref(`pacientes/${this.state.updatekey}`)
+      .update(paciente)
+      .then(() => {
+        this.state.switch = true;
+        this.setModalVisible(false);
+      })
+      .catch((err) => console.log(err))
   }
+
+  submit_paciente = () => {
+    var paciente = this._form.getValue();
+    (this.state.switch) ? this.agregar_paciente(paciente) : this.actualizar_paciente(paciente)
+  }
+
+  // test = () => {
+  //   firebase.database().ref()
+  //     .child("pacientes")
+  //     .child("111")
+  //     .once("value")
+  //     .then(dataSnapshot => {
+  //       console.log(dataSnapshot)
+  //       console.log(dataSnapshot.node_.children_.root_.value == undefined)
+  //       var nombre = dataSnapshot.node_.children_.root_.value.value_
+  //       var apellidos = dataSnapshot.node_.children_.root_.left.value.value_
+  //       console.log("nombre", nombre)
+  //       console.log("apellidos", apellidos)
+  //     })
+  // }
 
   render() {
     return (
@@ -174,16 +292,19 @@ export default class App extends Component<Props> {
         <Modal
           animationType="slide"
           transparent={false}
-          visible={this.state.modalVisible}>
+          visible={this.state.modalVisible}
+          onRequestClose={() => { }}>
+
           <View style={styles.container_modal}>
             <View>
               <Form
                 ref={c => this._form = c}
                 type={User}
+                value={this.state.form_value}
               />
               <Button
-                title="Agregar Paciente"
-                onPress={this.agregar_paciente}
+                title={this.state.submit_text}
+                onPress={this.submit_paciente}
               />
 
               <TouchableHighlight
@@ -207,14 +328,12 @@ export default class App extends Component<Props> {
               </FlatListItem>
             );
           }}
+          keyExtractor={(item, index) => index.toString()}
         />
 
         <ActionButton
           buttonColor="rgba(231,76,60,1)"
-
-          onPress={() => {
-            this.setModalVisible(true);
-          }}
+          onPress={this.modal_agregar_paciente}
         />
       </View>
     );
